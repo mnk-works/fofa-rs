@@ -8,7 +8,7 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/mnk-works/fofa-rs"
 keywords = ["fofa", "security", "scanner", "cli", "api"]
-categories = ["command-line-utilities", "api", "network-programming"]
+categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 reqwest = { version = "0.12", features = ["json"] }

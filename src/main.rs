@@ -1,6 +1,6 @@
 use anyhow::Result;
 use base64::Engine;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use colored::*;
 use dirs::home_dir;
 use reqwest::Client;
@@ -9,7 +9,7 @@ use std::fs;
 
 /// FOFA.io search results parser
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about = "FOFA.io search results parser", long_about = None)]
 struct Args {
     /// Search query (e.g., "title=\"Test\"")
     #[arg(short, long, default_value = "title=\"Test\"")]
@@ -23,17 +23,44 @@ struct Args {
     #[arg(short, long, default_value_t = 1)]
     page: usize,
 
-    /// FOFA account email (optional, defaults to you@example.com)
-    #[arg(short, long, env = "FOFA_EMAIL")]
-    email: Option<String>,
+    /// Subcommand
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
 
-    /// FOFA API key (optional, defaults to your_api_key)
-    #[arg(short, long, env = "FOFA_KEY")]
-    key: Option<String>,
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Login and save credentials to local config
+    Login {
+        /// FOFA account email
+        #[arg(short, long)]
+        email: String,
 
-    /// Save credentials to local config file
-    #[arg(short, long)]
-    save_credentials: bool,
+        /// FOFA API key
+        #[arg(short, long)]
+        key: String,
+    },
+
+    /// Logout and remove saved credentials
+    Logout,
+
+    /// Show current authentication status
+    Status,
+
+    /// Search FOFA (default action)
+    Search {
+        /// Search query (e.g., "title=\"Test\"")
+        #[arg(short, long, default_value = "title=\"Test\"")]
+        query: String,
+
+        /// Maximum number of results to display (default: 50)
+        #[arg(short, long, default_value_t = 50)]
+        limit: usize,
+
+        /// Page number (default: 1)
+        #[arg(short, long, default_value_t = 1)]
+        page: usize,
+    },
 }
 
 /// FOFA API search response
@@ -81,64 +108,102 @@ impl FofaSearchResponse {
     }
 }
 
+fn config_path() -> std::path::PathBuf {
+    home_dir().unwrap().join(".config/fofa-rs/credentials.json")
+}
+
+fn is_logged_in() -> bool {
+    config_path().exists()
+}
+
+fn save_credentials(email: &str, key: &str) -> Result<()> {
+    let config_dir = home_dir().unwrap().join(".config/fofa-rs");
+    fs::create_dir_all(&config_dir)?;
+    let credentials = serde_json::json!({
+        "email": email,
+        "key": key,
+    });
+    fs::write(config_path(), serde_json::to_string(&credentials)?)?;
+    println!("{} Credentials saved to {}", "✓".green().bold(), config_path().display());
+    Ok(())
+}
+
+fn load_credentials() -> Result<(String, String)> {
+    let config_content = fs::read_to_string(config_path())?;
+    let credentials: serde_json::Value = serde_json::from_str(&config_content)?;
+    let email = credentials["email"].as_str().unwrap_or("you@example.com").to_string();
+    let key = credentials["key"].as_str().unwrap_or("your_api_key").to_string();
+    Ok((email, key))
+}
+
+fn remove_credentials() -> Result<()> {
+    if config_path().exists() {
+        fs::remove_file(config_path())?;
+        println!("{} Credentials removed", "✓".green().bold());
+    } else {
+        println!("{} No credentials to remove", "ℹ".blue().bold());
+    }
+    Ok(())
+}
+
+fn show_status() -> Result<()> {
+    if is_logged_in() {
+        let (email, key) = load_credentials()?;
+        println!("{} Logged in as: {}", "✓".green().bold(), email.cyan());
+        println!("{} API key: {}", "•".dimmed(), format!("{}***{}", &key[..4.min(key.len())], &key[key.len().saturating_sub(4)..]).dimmed());
+    } else {
+        println!("{} Not logged in", "✗".red().bold());
+        println!("Run `fofa-rs login -e <email> -k <key>` to authenticate");
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Check if saving credentials
-    if args.save_credentials {
-        // Save credentials to config file
-        let config_dir = home_dir().unwrap().join(".config/fofa-rs");
-        fs::create_dir_all(&config_dir).unwrap();
-        let config_path = config_dir.join("credentials.json");
-        let credentials = serde_json::json!({
-            "email": args.email,
-            "key": args.key,
-        });
-        fs::write(&config_path, serde_json::to_string(&credentials).unwrap()).unwrap();
-        println!("Credentials saved to {}", config_path.display());
+    match args.command {
+        Some(Commands::Login { email, key }) => {
+            save_credentials(&email, &key)?;
+        }
+        Some(Commands::Logout) => {
+            remove_credentials()?;
+        }
+        Some(Commands::Status) => {
+            show_status()?;
+        }
+        Some(Commands::Search { query, limit, page }) => {
+            do_search(query, limit, page).await?;
+        }
+        None => {
+            // Default action: search with main args
+            do_search(args.query, args.limit, args.page).await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn do_search(query: String, limit: usize, page: usize) -> Result<()> {
+    if !is_logged_in() {
+        eprintln!("{} Not logged in. Run `fofa-rs login -e <email> -k <key>` first", "✗".red().bold());
         return Ok(());
     }
 
-    // Check if config file exists
-    let config_path = home_dir().unwrap().join(".config/fofa-rs/credentials.json");
-    let use_saved_credentials = config_path.exists();
-
-    // Get email and key - prioritize: args > saved config > defaults
-    let email = if let Some(e) = args.email {
-        e
-    } else if use_saved_credentials {
-        // Read from config file
-        let config_content = fs::read_to_string(&config_path).unwrap();
-        let credentials: serde_json::Value = serde_json::from_str(&config_content).unwrap();
-        credentials["email"].as_str().map(|s| s.to_string()).unwrap_or_else(|| "you@example.com".to_string())
-    } else {
-        "you@example.com".to_string()
-    };
-
-    let key = if let Some(k) = args.key {
-        k
-    } else if use_saved_credentials {
-        // Read from config file
-        let config_content = fs::read_to_string(&config_path).unwrap();
-        let credentials: serde_json::Value = serde_json::from_str(&config_content).unwrap();
-        credentials["key"].as_str().map(|s| s.to_string()).unwrap_or_else(|| "your_api_key".to_string())
-    } else {
-        "your_api_key".to_string()
-    };
+    let (email, key) = load_credentials()?;
 
     println!(
         "{}",
-        format!("🔍 Querying FOFA: {}", args.query).bold().green()
+        format!("🔍 Querying FOFA: {}", query).bold().green()
     );
 
     // Encode the query in base64 (as required by FOFA API)
-    let query_b64 = base64::engine::general_purpose::STANDARD.encode(args.query.as_bytes());
+    let query_b64 = base64::engine::general_purpose::STANDARD.encode(query.as_bytes());
 
     // Build the request URL
     let url = format!(
         "https://fofa.info/api/v1/search/all?email={}&key={}&qbase64={}&page={}&size={}&fields=ip,host,port",
-        email, key, query_b64, args.page, args.limit.max(50).min(1000)
+        email, key, query_b64, page, limit.max(50).min(1000)
     );
 
     // Send the HTTP GET request
@@ -168,7 +233,7 @@ async fn main() -> Result<()> {
     }
 
     // Display results
-    response.print_results(args.limit);
+    response.print_results(limit);
 
     Ok(())
 }
@@ -178,9 +243,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_query_parsing() {
-        let args = Args::parse_from(["prog", "--query", "title=\"Test\""]);
-        assert_eq!(args.query, "title=\"Test\"");
+    fn test_login_parsing() {
+        let args =
+            Args::parse_from(["prog", "login", "-e", "test@example.com", "-k", "secret"]);
+        match args.command {
+            Some(Commands::Login { email, key }) => {
+                assert_eq!(email, "test@example.com");
+                assert_eq!(key, "secret");
+            }
+            _ => panic!("Expected Login command"),
+        }
     }
 
     #[test]

@@ -2,6 +2,13 @@
 name = "fofa-rs"
 version = "0.1.0"
 edition = "2024"
+authors = ["modemnakata <modemnakata@example.com>"]
+description = "A fast, lightweight Rust CLI tool for parsing FOFA.io search results"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/mnk-works/fofa-rs"
+keywords = ["fofa", "security", "scanner", "cli", "api"]
+categories = ["command-line-utilities", "api", "network-programming"]
 
 [dependencies]
 reqwest = { version = "0.12", features = ["json"] }

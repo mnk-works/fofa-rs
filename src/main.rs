@@ -34,10 +34,6 @@ struct Args {
     /// Save credentials to local config file
     #[arg(short, long)]
     save_credentials: bool,
-
-    /// Use demo data without making API requests
-    #[arg(short, long)]
-    demo: bool,
 }
 
 /// FOFA API search response
@@ -109,64 +105,6 @@ async fn main() -> Result<()> {
     let use_saved_credentials = config_path.exists();
 
     // Get email and key - prioritize: args > saved config > defaults
-    // Determine if we should use demo mode
-    let use_demo_mode = args.demo || (
-        args.email.is_none() && args.key.is_none() &&
-        !use_saved_credentials
-    );
-
-    if use_demo_mode {
-        // Demo mode - show sample data
-        println!(
-            "{}",
-            "🔍 Demo mode: Using sample data (no FOFA credentials provided)".bold().yellow()
-        );
-        println!("{}", "=" .repeat(80));
-
-        // Sample FOFA results - demonstrates the parser with real data format
-        let sample_results: Vec<Vec<String>> = vec![
-            vec!["142.250.190.46".to_string(), "www.google.com".to_string(), "443".to_string(), "https".to_string(), "HTTP".to_string()],
-            vec!["104.16.106.248".to_string(), "cdnjs.cloudflare.com".to_string(), "443".to_string(), "https".to_string(), "cloudflare".to_string()],
-            vec!["172.217.168.238".to_string(), "www.google.com".to_string(), "443".to_string(), "https".to_string(), "Google".to_string()],
-            vec!["151.101.1.133".to_string(), "github.com".to_string(), "443".to_string(), "https".to_string(), "GitHub".to_string()],
-            vec!["13.224.164.55".to_string(), "windows.com".to_string(), "443".to_string(), "https".to_string(), "Microsoft".to_string()],
-        ];
-
-        let total = 8555; // Simulated total
-        let displayed = sample_results.len().min(args.limit);
-
-        println!(
-            "{} {}",
-            format!("{displayed} results retrieved").bold().cyan(),
-            format!("(showing {} of {})", displayed, total).dimmed()
-        );
-        println!("{}", "─".repeat(80));
-
-        for (i, result) in sample_results.iter().take(args.limit).enumerate() {
-            let idx = format!("{}.", i + 1).dimmed();
-            let ip = result.first().map(|s| s.as_str()).unwrap_or("");
-            let port = result.get(2).map(|s| s.as_str()).unwrap_or("");
-            let host = result.get(1).map(|s| s.as_str()).unwrap_or("");
-
-            println!(
-                "{} {} {} {}",
-                idx,
-                ip.blue().bold(),
-                ":",
-                port.yellow()
-            );
-
-            if !host.is_empty() {
-                println!("    {}", format!("({host})").green());
-            }
-        }
-
-        println!("\n{}", "💡 Tip: Get your own FOFA API key at https://fofa.info".dimmed().italic());
-        println!("{}", "=" .repeat(80));
-        return Ok(());
-    }
-
-    // Real API mode
     let email = if let Some(e) = args.email {
         e
     } else if use_saved_credentials {

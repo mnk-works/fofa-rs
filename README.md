@@ -2,7 +2,6 @@
 
 A fast, lightweight Rust CLI tool for parsing FOFA.io search results.
 
-![Build Status](https://github.com/mnk-works/fofa-rs/workflows/CI/badge.svg)
 ![Crates.io](https://img.shields.io/crates/v/fofa-rs.svg)
 ![License](https://img.shields.io/crates/l/fofa-rs.svg)
 
@@ -11,11 +10,8 @@ A fast, lightweight Rust CLI tool for parsing FOFA.io search results.
 - 🔍 **Query FOFA API** - Search for hosts, services, and vulnerabilities
 - 🎨 **Colored output** - Easy-to-read formatted results
 - 📄 **Multiple fields** - IP, port, host/domain, and more
-- ⚡ **Fast & lightweight** - Built with Rust, zero runtime overhead
-- 🔧 **Flexible** - Configurable query, limit, page, and output
+- ⚡ **Fast & lightweight** - Built with Rust
 - 💾 **Save credentials** - Store your FOFA API credentials locally for future use
-- 🧪 **Demo mode** - Works without any credentials using sample data
-- 🧪 **Unit tests** - 3 tests covering core functionality
 
 ## Installation
 
@@ -39,17 +35,24 @@ Download from [Releases](https://github.com/mnk-works/fofa-rs/releases).
 
 ## Usage
 
-### Basic usage (requires FOFA credentials)
+### Credentials required
+
+FOFA API access requires valid email and API key credentials. Save them once, then use without typing them again:
+
 ```bash
+# Save credentials locally
+fofa-rs --save-credentials --email your@email.com --key your_api_key
+
+# Use saved credentials (no need to type them again)
+fofa-rs -q "title=\"nginx\""
+
+# Or pass credentials directly
+fofa-rs -e your@email.com -k your_api_key -q "port=80"
+
+# Use environment variables
 export FOFA_EMAIL="your@email.com"
 export FOFA_KEY="your_api_key"
-fofa-rs -q "title=\"nginx\""
-```
-
-### Demo mode (no credentials needed)
-```bash
-# Uses sample data without FOFA credentials
-fofa-rs
+fofa-rs -q "port=80"
 ```
 
 ### Options
@@ -63,17 +66,8 @@ Options:
   -e, --email <EMAIL>      FOFA account email [env: FOFA_EMAIL=]
   -k, --key <KEY>          FOFA API key [env: FOFA_KEY=]
   -s, --save-credentials   Save credentials to local config file
-  -d, --demo               Use demo data without making API requests
   -h, --help               Print help
   -V, --version            Print version
-```
-
-### Using environment variables
-
-```bash
-export FOFA_EMAIL="your@email.com"
-export FOFA_KEY="your_api_key"
-fofa-rs -q "port=80"
 ```
 
 ### Example queries

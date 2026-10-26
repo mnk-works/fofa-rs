@@ -2,8 +2,10 @@ use anyhow::Result;
 use base64::Engine;
 use clap::Parser;
 use colored::*;
+use dirs::home_dir;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::fs;
 
 /// FOFA.io search results parser
 #[derive(Parser, Debug)]
@@ -28,6 +30,14 @@ struct Args {
     /// FOFA API key (optional, defaults to your_api_key)
     #[arg(short, long, env = "FOFA_KEY")]
     key: Option<String>,
+
+    /// Save credentials to local config file
+    #[arg(short, long)]
+    save_credentials: bool,
+
+    /// Use demo data without making API requests
+    #[arg(short, long)]
+    demo: bool,
 }
 
 /// FOFA API search response
@@ -79,18 +89,39 @@ impl FofaSearchResponse {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let email = args.email.unwrap_or_else(|| "you@example.com".to_string());
-    let key = args.key.unwrap_or_else(|| "your_api_key".to_string());
+    // Check if saving credentials
+    if args.save_credentials {
+        // Save credentials to config file
+        let config_dir = home_dir().unwrap().join(".config/fofa-rs");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("credentials.json");
+        let credentials = serde_json::json!({
+            "email": args.email,
+            "key": args.key,
+        });
+        fs::write(&config_path, serde_json::to_string(&credentials).unwrap()).unwrap();
+        println!("Credentials saved to {}", config_path.display());
+        return Ok(());
+    }
 
-    // Check if using default credentials (demo mode)
-    let is_demo = email == "you@example.com" && key == "your_api_key";
+    // Check if config file exists
+    let config_path = home_dir().unwrap().join(".config/fofa-rs/credentials.json");
+    let use_saved_credentials = config_path.exists();
 
-    if is_demo {
+    // Get email and key - prioritize: args > saved config > defaults
+    // Determine if we should use demo mode
+    let use_demo_mode = args.demo || (
+        args.email.is_none() && args.key.is_none() &&
+        !use_saved_credentials
+    );
+
+    if use_demo_mode {
+        // Demo mode - show sample data
         println!(
             "{}",
             "🔍 Demo mode: Using sample data (no FOFA credentials provided)".bold().yellow()
         );
-        println!("{}", "=".repeat(80));
+        println!("{}", "=" .repeat(80));
 
         // Sample FOFA results - demonstrates the parser with real data format
         let sample_results: Vec<Vec<String>> = vec![
@@ -102,7 +133,7 @@ async fn main() -> Result<()> {
         ];
 
         let total = 8555; // Simulated total
-        let displayed = sample_results.len();
+        let displayed = sample_results.len().min(args.limit);
 
         println!(
             "{} {}",
@@ -111,7 +142,7 @@ async fn main() -> Result<()> {
         );
         println!("{}", "─".repeat(80));
 
-        for (i, result) in sample_results.iter().enumerate() {
+        for (i, result) in sample_results.iter().take(args.limit).enumerate() {
             let idx = format!("{}.", i + 1).dimmed();
             let ip = result.first().map(|s| s.as_str()).unwrap_or("");
             let port = result.get(2).map(|s| s.as_str()).unwrap_or("");
@@ -131,52 +162,75 @@ async fn main() -> Result<()> {
         }
 
         println!("\n{}", "💡 Tip: Get your own FOFA API key at https://fofa.info".dimmed().italic());
-        println!("{}", "=".repeat(80));
-    } else {
-        // Real API mode
-        println!(
-            "{}",
-            format!("🔍 Querying FOFA: {}", args.query).bold().green()
-        );
-
-        // Encode the query in base64 (as required by FOFA API)
-        let query_b64 = base64::engine::general_purpose::STANDARD.encode(args.query.as_bytes());
-
-        // Build the request URL
-        let url = format!(
-            "https://fofa.info/api/v1/search/all?email={}&key={}&qbase64={}&page={}&size={}&fields=ip,host,port",
-            email, key, query_b64, args.page, args.limit.max(50).min(1000)
-        );
-
-        // Send the HTTP GET request
-        let client = Client::builder()
-            .user_agent("fofa-rs/0.1")
-            .build()?;
-
-        let resp = client.get(&url).send().await?.error_for_status()?;
-
-        let json_str = resp.text().await?;
-
-        // Parse the JSON response
-        let response: FofaSearchResponse = match serde_json::from_str(&json_str) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("{}: {e}", "Failed to parse response".red().bold());
-                eprintln!("Raw response: {}", json_str.dimmed());
-                return Err(anyhow::anyhow!("JSON parse error"));
-            }
-        };
-
-        // Check for API errors
-        if response.error {
-            eprintln!("{}: {}", "FOFA API Error".red().bold(), response.errmsg);
-            eprintln!("Please verify your email and API key are correct.");
-            return Err(anyhow::anyhow!("API error: {}", response.errmsg));
-        }
-
-        // Display results
-        response.print_results(args.limit);
+        println!("{}", "=" .repeat(80));
+        return Ok(());
     }
+
+    // Real API mode
+    let email = if let Some(e) = args.email {
+        e
+    } else if use_saved_credentials {
+        // Read from config file
+        let config_content = fs::read_to_string(&config_path).unwrap();
+        let credentials: serde_json::Value = serde_json::from_str(&config_content).unwrap();
+        credentials["email"].as_str().map(|s| s.to_string()).unwrap_or_else(|| "you@example.com".to_string())
+    } else {
+        "you@example.com".to_string()
+    };
+
+    let key = if let Some(k) = args.key {
+        k
+    } else if use_saved_credentials {
+        // Read from config file
+        let config_content = fs::read_to_string(&config_path).unwrap();
+        let credentials: serde_json::Value = serde_json::from_str(&config_content).unwrap();
+        credentials["key"].as_str().map(|s| s.to_string()).unwrap_or_else(|| "your_api_key".to_string())
+    } else {
+        "your_api_key".to_string()
+    };
+
+    println!(
+        "{}",
+        format!("🔍 Querying FOFA: {}", args.query).bold().green()
+    );
+
+    // Encode the query in base64 (as required by FOFA API)
+    let query_b64 = base64::engine::general_purpose::STANDARD.encode(args.query.as_bytes());
+
+    // Build the request URL
+    let url = format!(
+        "https://fofa.info/api/v1/search/all?email={}&key={}&qbase64={}&page={}&size={}&fields=ip,host,port",
+        email, key, query_b64, args.page, args.limit.max(50).min(1000)
+    );
+
+    // Send the HTTP GET request
+    let client = Client::builder()
+        .user_agent("fofa-rs/0.1")
+        .build()?;
+
+    let resp = client.get(&url).send().await?.error_for_status()?;
+
+    let json_str = resp.text().await?;
+
+    // Parse the JSON response
+    let response: FofaSearchResponse = match serde_json::from_str(&json_str) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{}: {e}", "Failed to parse response".red().bold());
+            eprintln!("Raw response: {}", json_str.dimmed());
+            return Err(anyhow::anyhow!("JSON parse error"));
+        }
+    };
+
+    // Check for API errors
+    if response.error {
+        eprintln!("{}: {}", "FOFA API Error".red().bold(), response.errmsg);
+        eprintln!("Please verify your email and API key are correct.");
+        return Err(anyhow::anyhow!("API error: {}", response.errmsg));
+    }
+
+    // Display results
+    response.print_results(args.limit);
 
     Ok(())
 }
